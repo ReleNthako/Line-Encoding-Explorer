@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Line Encoding Explorer: NRZ, NRZ-I, Manchester, Bipolar</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1e2740; --border:#2b3654;
+    --text:#e8ecf7; --muted:#95a1c2; --accent:#5fb0ff; --accent2:#ff9d5f;
+    --good:#4ade80; --bad:#f87171;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:16px; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    line-height:1.5;
+  }
+  h1{font-size:1.3rem; margin:0 0 4px;}
+  .sub{color:var(--muted); font-size:0.85rem; margin-bottom:16px;}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:14px; margin-bottom:14px;
+  }
+  .card h2{font-size:1rem; margin:0 0 8px; color:var(--accent);}
+  .bitrow{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+  .bit-btn{
+    width:38px; height:38px; border-radius:8px; border:1px solid var(--border);
+    background:var(--panel2); color:var(--text); font-size:1rem; font-weight:600;
+    cursor:pointer;
+  }
+  .bit-btn.on{background:var(--accent); color:#08111f; border-color:var(--accent);}
+  .controls{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px;}
+  .controls button, .controls input{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:8px 10px; border-radius:8px; font-size:0.85rem;
+  }
+  .controls button{cursor:pointer;}
+  .controls button:active{background:var(--accent); color:#08111f;}
+  .enc-block{margin-bottom:18px;}
+  .enc-title{font-size:0.9rem; font-weight:700; margin-bottom:2px; display:flex; align-items:center; gap:8px;}
+  .enc-rule{font-size:0.78rem; color:var(--muted); margin-bottom:6px;}
+  canvas{width:100%; display:block; background:var(--panel2); border-radius:8px; border:1px solid var(--border);}
+  .badge{
+    font-size:0.65rem; padding:2px 7px; border-radius:999px; border:1px solid var(--border);
+    color:var(--muted);
+  }
+  table{width:100%; border-collapse:collapse; font-size:0.82rem;}
+  th,td{border:1px solid var(--border); padding:6px 8px; text-align:left; vertical-align:top;}
+  th{color:var(--accent); background:var(--panel2);}
+  .toggle-row{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;}
+  .toggle-row button{
+    flex:1; min-width:80px; background:var(--panel2); border:1px solid var(--border);
+    color:var(--muted); padding:8px; border-radius:8px; font-size:0.78rem; cursor:pointer;
+  }
+  .toggle-row button.active{background:var(--accent); color:#08111f; border-color:var(--accent); font-weight:600;}
+  details{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px;}
+  summary{cursor:pointer; font-weight:600; font-size:0.85rem; color:var(--accent2);}
+  details p, details li{font-size:0.82rem; color:var(--text);}
+  .legend{display:flex; gap:14px; font-size:0.72rem; color:var(--muted); margin-top:4px; flex-wrap:wrap;}
+  .legend span{display:inline-flex; align-items:center; gap:4px;}
+  .dot{width:10px; height:10px; border-radius:2px; display:inline-block;}
+</style>
+</head>
+<body>
+
+<h1>Line Encoding Explorer</h1>
+<div class="sub">Tap bits to build your own sequence and watch NRZ‑L, NRZ‑I, Manchester and Bipolar AMI draw themselves in real time.</div>
+
+<div class="card">
+  <h2>Your bit sequence</h2>
+  <div class="bitrow" id="bitrow"></div>
+  <div class="controls">
+    <button onclick="addBit()">+ bit</button>
+    <button onclick="removeBit()">− bit</button>
+    <button onclick="randomize()">🎲 random</button>
+    <button onclick="loadPreset('1011001101101')">exam-style preset</button>
+  </div>
+  <div class="controls">
+    <button onclick="loadPreset('0000000')">all 0s (edge case)</button>
+    <button onclick="loadPreset('1111111')">all 1s (edge case)</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Waveforms</h2>
+  <canvas id="clockCanvas" height="60"></canvas>
+  <div style="font-size:0.7rem;color:var(--muted);margin:2px 0 14px;">↑ bit boundaries (for reference)</div>
+
+  <div class="enc-block">
+    <div class="enc-title">NRZ‑L <span class="badge">level-based</span></div>
+    <div class="enc-rule">1 = HIGH level, 0 = LOW level. No mandatory transition — long runs of same bit give a flat line.</div>
+    <canvas id="nrzlCanvas" height="80"></canvas>
+  </div>
+
+  <div class="enc-block">
+    <div class="enc-title">NRZ‑I <span class="badge">transition-based</span></div>
+    <div class="enc-rule">1 = transition at start of the bit interval. 0 = no transition (level just continues).</div>
+    <canvas id="nrziCanvas" height="80"></canvas>
+  </div>
+
+  <div class="enc-block">
+    <div class="enc-title">Manchester <span class="badge">self-clocking</span></div>
+    <div class="enc-rule">Every bit has a transition in the middle. (Using IEEE 802.3 convention: 0 = low→high mid transition, 1 = high→low mid transition.)</div>
+    <canvas id="manCanvas" height="80"></canvas>
+  </div>
+
+  <div class="enc-block">
+    <div class="enc-title">Bipolar AMI <span class="badge">3-level</span></div>
+    <div class="enc-rule">0 = zero voltage (no pulse). 1 = pulse, alternating polarity each time (+, −, +, −...).</div>
+    <canvas id="biCanvas" height="80"></canvas>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#5fb0ff;"></span>Signal</span>
+    <span><span class="dot" style="background:#2b3654;"></span>Bit boundary</span>
+    <span><span class="dot" style="background:#ff9d5f;"></span>0 V reference</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Why it matters — quick compare</h2>
+  <table>
+    <tr><th>Scheme</th><th>Levels</th><th>Self-clocking?</th><th>Key weakness</th></tr>
+    <tr><td>NRZ‑L</td><td>2</td><td>No</td><td>Long runs of same bit → no transitions → clock sync (baseline wander) breaks down</td></tr>
+    <tr><td>NRZ‑I</td><td>2</td><td>Only on 1s</td><td>Long runs of 0s are still silent — same sync problem, just shifted to the other bit</td></tr>
+    <tr><td>Manchester</td><td>2</td><td>Yes, always</td><td>Needs double the bandwidth (transition every half-bit)</td></tr>
+    <tr><td>Bipolar AMI</td><td>3</td><td>Only on 1s</td><td>Long runs of 0s still cause sync loss, but gets built-in error detection (two same-polarity pulses in a row = bipolar violation)</td></tr>
+  </table>
+  <details>
+    <summary>Why do we even need alternatives to NRZ‑L?</summary>
+    <p>NRZ‑L's problem is <b>baseline wander and clock drift</b>: if you send ten 1s in a row, the line just sits at HIGH with zero transitions. The receiver has no edges to resync its clock against, so it can lose count of exactly how many bits it received. Every other scheme here is really just a different strategy for guaranteeing enough transitions.</p>
+  </details>
+  <details>
+    <summary>NRZ vs NRZ-I — what's the real difference in mindset?</summary>
+    <p>NRZ‑L encodes the <b>bit value</b> directly as a voltage level. NRZ‑I encodes the bit as a <b>decision to change or not change</b> — it's differential. This matters practically: NRZ‑I doesn't care about your wiring polarity (flip the two wires and it still decodes correctly), while NRZ‑L breaks if the polarity is reversed.</p>
+  </details>
+  <details>
+    <summary>Manchester — why the "double bandwidth" tradeoff is worth it</summary>
+    <p>Because every single bit guarantees a mid-bit transition, the receiver can always resync its clock every bit period — that's what "self-clocking" means. This is why classic Ethernet (10BASE-T) used Manchester: reliability of timing was worth sacrificing raw bandwidth efficiency.</p>
+  </details>
+  <details>
+    <summary>Bipolar AMI — the clever bit</summary>
+    <p>AMI stands for Alternate Mark Inversion ("mark" = old telecom term for a 1). Because consecutive 1-pulses must alternate polarity, if a receiver ever sees two 1s in a row with the <b>same</b> polarity, it knows an error occurred — that's a free error-detection mechanism NRZ and Manchester don't get. It's also DC-balanced (average voltage ≈ 0), which single-ended NRZ isn't.</p>
+  </details>
+</div>
+
+<script>
+let bits = "1011001".split('').map(Number);
+
+function renderBitRow(){
+  const row = document.getElementById('bitrow');
+  row.innerHTML = '';
+  bits.forEach((b,i)=>{
+    const btn = document.createElement('button');
+    btn.className = 'bit-btn' + (b? ' on':'');
+    btn.textContent = b;
+    btn.onclick = ()=>{ bits[i] = bits[i]?0:1; renderBitRow(); drawAll(); };
+    row.appendChild(btn);
+  });
+}
+function addBit(){ if(bits.length<20){ bits.push(0); renderBitRow(); drawAll(); } }
+function removeBit(){ if(bits.length>1){ bits.pop(); renderBitRow(); drawAll(); } }
+function randomize(){ bits = bits.map(()=>Math.round(Math.random())); renderBitRow(); drawAll(); }
+function loadPreset(str){ bits = str.split('').map(Number); renderBitRow(); drawAll(); }
+
+function setupCanvas(canvas){
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx, w: rect.width, h: rect.height};
+}
+
+function drawBoundaries(ctx, w, h, n){
+  const step = w/n;
+  ctx.strokeStyle = '#2b3654';
+  ctx.lineWidth = 1;
+  for(let i=0;i<=n;i++){
+    ctx.beginPath();
+    ctx.moveTo(i*step, 0);
+    ctx.lineTo(i*step, h);
+    ctx.stroke();
+  }
+}
+
+function drawClock(){
+  const canvas = document.getElementById('clockCanvas');
+  const {ctx,w,h} = setupCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  drawBoundaries(ctx,w,h,bits.length);
+  const step = w/bits.length;
+  ctx.fillStyle = '#95a1c2';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  bits.forEach((b,i)=>{
+    ctx.fillText(b, i*step + step/2, h/2+4);
+  });
+}
+
+// path helper: draws a level line across [x0,x1] at given y
+function seg(ctx, x0,x1,y){ ctx.lineTo(x0,y); ctx.lineTo(x1,y); }
+
+function drawNRZL(){
+  const canvas = document.getElementById('nrzlCanvas');
+  const {ctx,w,h} = setupCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  drawBoundaries(ctx,w,h,bits.length);
+  const step = w/bits.length;
+  const hi = h*0.25, lo = h*0.75;
+  ctx.strokeStyle = '#5fb0ff'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  let prevY = bits[0]? hi: lo;
+  ctx.moveTo(0, prevY);
+  bits.forEach((b,i)=>{
+    const y = b? hi: lo;
+    const x0=i*step, x1=(i+1)*step;
+    ctx.lineTo(x0,y);
+    ctx.lineTo(x1,y);
+  });
+  ctx.stroke();
+}
+
+function drawNRZI(){
+  const canvas = document.getElementById('nrziCanvas');
+  const {ctx,w,h} = setupCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  drawBoundaries(ctx,w,h,bits.length);
+  const step = w/bits.length;
+  const hi = h*0.25, lo = h*0.75;
+  ctx.strokeStyle = '#5fb0ff'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  let level = lo; // assume starting low
+  ctx.moveTo(0, level);
+  bits.forEach((b,i)=>{
+    const x0=i*step, x1=(i+1)*step;
+    if(b===1){ level = (level===hi)? lo: hi; } // transition at start
+    ctx.lineTo(x0, level);
+    ctx.lineTo(x1, level);
+  });
+  ctx.stroke();
+}
+
+function drawManchester(){
+  const canvas = document.getElementById('manCanvas');
+  const {ctx,w,h} = setupCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  drawBoundaries(ctx,w,h,bits.length);
+  const step = w/bits.length;
+  const hi = h*0.25, lo = h*0.75;
+  ctx.strokeStyle = '#5fb0ff'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  // IEEE 802.3: bit 0 -> low then high (transition low->high at mid), bit 1 -> high then low
+  let started=false;
+  bits.forEach((b,i)=>{
+    const x0=i*step, xm=i*step+step/2, x1=(i+1)*step;
+    const firstY = b? hi: lo;
+    const secondY = b? lo: hi;
+    if(!started){ ctx.moveTo(x0, firstY); started=true; }
+    else { ctx.lineTo(x0, firstY); }
+    ctx.lineTo(xm, firstY);
+    ctx.lineTo(xm, secondY);
+    ctx.lineTo(x1, secondY);
+  });
+  ctx.stroke();
+}
+
+function drawBipolar(){
+  const canvas = document.getElementById('biCanvas');
+  const {ctx,w,h} = setupCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  drawBoundaries(ctx,w,h,bits.length);
+  const step = w/bits.length;
+  const hi = h*0.2, mid = h*0.5, lo = h*0.8;
+  // zero reference line
+  ctx.strokeStyle = '#ff9d5f'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(w,mid); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = '#5fb0ff'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  let lastPolarity = -1; // so first pulse is positive
+  let y = mid;
+  ctx.moveTo(0, y);
+  bits.forEach((b,i)=>{
+    const x0=i*step, x1=(i+1)*step;
+    if(b===0){
+      ctx.lineTo(x0, mid);
+      ctx.lineTo(x1, mid);
+      y = mid;
+    } else {
+      lastPolarity = -lastPolarity;
+      const target = lastPolarity===1? hi: lo;
+      ctx.lineTo(x0, target);
+      ctx.lineTo(x1, target);
+      y = target;
+    }
+  });
+  ctx.stroke();
+}
+
+function drawAll(){
+  drawClock();
+  drawNRZL();
+  drawNRZI();
+  drawManchester();
+  drawBipolar();
+}
+
+renderBitRow();
+drawAll();
+window.addEventListener('resize', drawAll);
+</script>
+
+</body>
+</html>
